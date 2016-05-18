@@ -37,6 +37,8 @@ void UWPoseEstimator::orientation_samplesTransformerCallback(const base::Time &t
     measurement_mask[BodyStateMemberPitch] = 1;
     measurement_mask[BodyStateMemberYaw] = 1;
     handleMeasurement(ts, orientation_samples_sample, measurement_mask, _imu2body);
+
+    angular_velocity = orientation_samples_sample.angular_velocity;
 }
 
 void UWPoseEstimator::lbl_position_samplesTransformerCallback(const base::Time &ts, const ::base::samples::RigidBodyState &lbl_position_samples_sample)
@@ -104,6 +106,7 @@ bool UWPoseEstimator::configureHook()
         return false;
     
     source_frame = _body_frame.get();
+    angular_velocity = Eigen::Vector3d::Zero();
     
     return true;
 }
@@ -121,7 +124,36 @@ void UWPoseEstimator::updateHook()
     verifyStreamAlignerStatus(_transformer);
     
     // update and write new state
-    updateState();
+    // integrate measurements
+    try
+    {
+	pose_estimator->integrateMeasurements();
+    }
+    catch (std::runtime_error e)
+    {
+	RTT::log(RTT::Error) << "Failed to integrate measurements: " << e.what() << RTT::endlog();
+    }
+    
+    // write estimated body state
+    StateAndCovariance current_state;
+    if(pose_estimator->getEstimatedState(current_state))
+    {
+        base::samples::RigidBodyState body_state;
+        BodyStateMeasurement::toRigidBodyState(current_state.mu, current_state.cov, body_state);
+        body_state.angular_velocity = angular_velocity;
+        current_body_state = body_state;
+	body_state.time = pose_estimator->getLastMeasurementTime();
+	body_state.targetFrame = _target_frame.get();
+	body_state.sourceFrame = source_frame;
+	_pose_samples.write(body_state);
+    }
+    
+    // write task state if it has changed
+    if(last_state != new_state)
+    {
+        last_state = new_state;
+        RBSFilter::state(new_state);
+    }
 }
 void UWPoseEstimator::errorHook()
 {

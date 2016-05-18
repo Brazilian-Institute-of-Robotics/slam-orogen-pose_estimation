@@ -27,6 +27,7 @@ namespace pose_estimation {
     {
 	friend class UWPoseEstimatorBase;
     protected:
+	Eigen::Vector3d angular_velocity;
 
         virtual void acceleration_samplesTransformerCallback(const base::Time &ts, const ::base::samples::RigidBodyAcceleration &acceleration_samples_sample);
 
